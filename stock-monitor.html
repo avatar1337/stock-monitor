@@ -1,0 +1,1070 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CBRS Monitor — Cha-Ching Terminal</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #070b0a;
+    --bg-2: #0b1310;
+    --panel: #0e1613;
+    --panel-2: #0a110e;
+    --inset: #060a09;
+    --border: #1b2823;
+    --border-bright: #2d4038;
+    --text: #cdded4;
+    --text-dim: #647a6f;
+    --text-faint: #3c4a44;
+    --green: #35d399;
+    --green-dim: #1d7a59;
+    --green-glow: rgba(53, 211, 153, 0.55);
+    --red: #ff5d52;
+    --red-glow: rgba(255, 93, 82, 0.55);
+    --amber: #f5b23e;
+    --amber-glow: rgba(245, 178, 62, 0.45);
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html, body { height: 100%; }
+
+  body {
+    background:
+      radial-gradient(ellipse 90% 60% at 50% -10%, #11201a 0%, transparent 60%),
+      radial-gradient(ellipse 70% 50% at 50% 110%, #0d1813 0%, transparent 55%),
+      var(--bg);
+    color: var(--text);
+    font-family: 'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+    min-height: 100%;
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    padding: 40px 20px 80px;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* ---- ambient overlays ---- */
+  .scanlines, .grain, .flash-overlay {
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: 50;
+  }
+  .scanlines {
+    background: repeating-linear-gradient(
+      to bottom,
+      rgba(0,0,0,0) 0px,
+      rgba(0,0,0,0) 2px,
+      rgba(0,0,0,0.22) 3px,
+      rgba(0,0,0,0) 4px
+    );
+    mix-blend-mode: multiply;
+    opacity: 0.55;
+  }
+  .grain {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+    opacity: 0.04;
+    mix-blend-mode: screen;
+  }
+  .flash-overlay {
+    z-index: 49;
+    opacity: 0;
+    transition: opacity 0.12s ease-out;
+  }
+  body.flash-green .flash-overlay {
+    opacity: 1;
+    background: radial-gradient(ellipse 80% 70% at 50% 45%, var(--green-glow) 0%, transparent 70%);
+    animation: flashfade 0.7s ease-out forwards;
+  }
+  body.flash-red .flash-overlay {
+    opacity: 1;
+    background: radial-gradient(ellipse 80% 70% at 50% 45%, var(--red-glow) 0%, transparent 70%);
+    animation: flashfade 0.7s ease-out forwards;
+  }
+  @keyframes flashfade {
+    0% { opacity: 0; }
+    18% { opacity: 1; }
+    100% { opacity: 0; }
+  }
+
+  /* ---- terminal frame ---- */
+  .terminal {
+    width: 100%;
+    max-width: 600px;
+    background: linear-gradient(180deg, var(--panel) 0%, var(--panel-2) 100%);
+    border: 1px solid var(--border-bright);
+    border-radius: 10px;
+    box-shadow:
+      0 0 0 1px rgba(0,0,0,0.6),
+      0 30px 80px -20px rgba(0,0,0,0.9),
+      inset 0 1px 0 rgba(255,255,255,0.04);
+    overflow: hidden;
+    position: relative;
+    z-index: 1;
+  }
+
+  .titlebar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 11px 14px;
+    background: linear-gradient(180deg, #15201b 0%, #101813 100%);
+    border-bottom: 1px solid var(--border);
+  }
+  .dots { display: flex; gap: 6px; }
+  .dots i {
+    width: 11px; height: 11px; border-radius: 50%;
+    display: block;
+    box-shadow: inset 0 0 0 1px rgba(0,0,0,0.35);
+  }
+  .dots i:nth-child(1) { background: #f0573f; }
+  .dots i:nth-child(2) { background: #f5b23e; }
+  .dots i:nth-child(3) { background: #35d399; }
+  .titlebar .path {
+    font-size: 12px;
+    color: var(--text-faint);
+    letter-spacing: 0.04em;
+    margin-left: 4px;
+  }
+  .titlebar .path b { color: var(--text-dim); font-weight: 500; }
+
+  .screen { padding: 26px 26px 24px; }
+
+  /* ---- header ---- */
+  header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+    padding-bottom: 20px;
+    border-bottom: 1px solid var(--border);
+  }
+  .ticker-id { display: flex; flex-direction: column; gap: 3px; }
+  .ticker-id .sym {
+    font-size: 26px;
+    font-weight: 700;
+    letter-spacing: 0.14em;
+    color: var(--text);
+  }
+  .ticker-id .sym::before {
+    content: "◆ ";
+    color: var(--amber);
+    font-size: 16px;
+    vertical-align: 2px;
+  }
+  .ticker-id .name {
+    font-size: 11px;
+    color: var(--text-dim);
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+  }
+  .status-pill {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding: 6px 11px;
+    border: 1px solid var(--border-bright);
+    border-radius: 999px;
+    background: var(--inset);
+    font-size: 11px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    white-space: nowrap;
+  }
+  .status-dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--text-faint);
+    flex-shrink: 0;
+  }
+  .status-dot.live { background: var(--green); box-shadow: 0 0 8px var(--green-glow); animation: pulse 1.6s ease-in-out infinite; }
+  .status-dot.warn { background: var(--amber); box-shadow: 0 0 8px var(--amber-glow); }
+  .status-dot.error { background: var(--red); box-shadow: 0 0 8px var(--red-glow); }
+  .status-dot.idle { background: var(--text-faint); }
+  .status-text.live { color: var(--green); }
+  .status-text.warn { color: var(--amber); }
+  .status-text.error { color: var(--red); }
+  .status-text.idle { color: var(--text-dim); }
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.35; }
+  }
+
+  /* ---- price block ---- */
+  .price-block {
+    padding: 26px 0 22px;
+    text-align: center;
+  }
+  .price {
+    font-size: clamp(3.2rem, 11vw, 4.6rem);
+    font-weight: 700;
+    line-height: 1;
+    letter-spacing: 0.01em;
+    transition: text-shadow 0.3s ease, color 0.3s ease;
+    color: var(--text);
+  }
+  .price.above {
+    color: #d6f7ea;
+    text-shadow: 0 0 18px var(--green-glow), 0 0 44px var(--green-glow);
+  }
+  .price.below {
+    color: #ffe2df;
+    text-shadow: 0 0 18px var(--red-glow), 0 0 44px var(--red-glow);
+  }
+  .change {
+    margin-top: 12px;
+    font-size: 15px;
+    font-weight: 500;
+    letter-spacing: 0.05em;
+  }
+  .change.up { color: var(--green); }
+  .change.down { color: var(--red); }
+  .change.flat { color: var(--text-dim); }
+  .verdict {
+    margin-top: 16px;
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    padding: 7px 12px;
+    display: inline-block;
+    border-radius: 5px;
+  }
+  .verdict.above { color: var(--green); background: rgba(53,211,153,0.08); border: 1px solid rgba(53,211,153,0.25); }
+  .verdict.below { color: var(--red); background: rgba(255,93,82,0.08); border: 1px solid rgba(255,93,82,0.25); }
+
+  /* ---- gauge ---- */
+  .gauge-wrap { padding: 6px 0 24px; }
+  .gauge-labels {
+    display: flex;
+    justify-content: space-between;
+    font-size: 10px;
+    color: var(--text-faint);
+    letter-spacing: 0.06em;
+    margin-bottom: 7px;
+  }
+  .gauge {
+    position: relative;
+    height: 30px;
+    background: var(--inset);
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    overflow: hidden;
+  }
+  .gauge-fill {
+    position: absolute;
+    top: 0; left: 0; bottom: 0;
+    width: 0%;
+    transition: width 0.6s cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  .gauge-fill.above { background: linear-gradient(90deg, rgba(53,211,153,0.12), rgba(53,211,153,0.35)); }
+  .gauge-fill.below { background: linear-gradient(90deg, rgba(255,93,82,0.12), rgba(255,93,82,0.35)); }
+  .gauge-thresh {
+    position: absolute;
+    top: -3px; bottom: -3px;
+    width: 2px;
+    background: var(--amber);
+    box-shadow: 0 0 8px var(--amber-glow);
+    transition: left 0.6s cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  .gauge-thresh::after {
+    content: attr(data-label);
+    position: absolute;
+    top: -16px;
+    left: 50%;
+    transform: translateX(-50%);
+    font-size: 9px;
+    color: var(--amber);
+    white-space: nowrap;
+    letter-spacing: 0.05em;
+  }
+  .gauge-marker {
+    position: absolute;
+    top: 50%;
+    width: 12px; height: 12px;
+    border-radius: 50%;
+    background: var(--text);
+    transform: translate(-50%, -50%);
+    box-shadow: 0 0 0 3px var(--inset), 0 0 12px rgba(255,255,255,0.4);
+    transition: left 0.6s cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  /* ---- status grid ---- */
+  .status-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 1px;
+    background: var(--border);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    overflow: hidden;
+    margin-bottom: 22px;
+  }
+  .stat {
+    background: var(--panel-2);
+    padding: 12px 10px;
+    text-align: center;
+  }
+  .stat .label {
+    font-size: 9px;
+    color: var(--text-faint);
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    margin-bottom: 5px;
+  }
+  .stat .val {
+    font-size: 15px;
+    color: var(--text);
+    font-weight: 500;
+  }
+
+  /* ---- controls ---- */
+  .controls {
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 18px;
+    margin-bottom: 20px;
+  }
+  .field { margin-bottom: 14px; }
+  .field:last-of-type { margin-bottom: 0; }
+  .field label {
+    display: block;
+    font-size: 10px;
+    color: var(--text-dim);
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    margin-bottom: 6px;
+  }
+  .field label a { color: var(--amber); text-decoration: none; border-bottom: 1px dotted var(--amber); }
+  .field label a:hover { opacity: 0.8; }
+  .input-row { display: flex; gap: 8px; }
+  input[type="text"], input[type="password"], input[type="number"] {
+    width: 100%;
+    background: var(--inset);
+    border: 1px solid var(--border-bright);
+    border-radius: 5px;
+    color: var(--text);
+    font-family: inherit;
+    font-size: 13px;
+    padding: 9px 11px;
+    letter-spacing: 0.03em;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  }
+  input:focus {
+    outline: none;
+    border-color: var(--green-dim);
+    box-shadow: 0 0 0 3px rgba(53,211,153,0.08);
+  }
+  input:disabled { opacity: 0.5; cursor: not-allowed; }
+  input::placeholder { color: var(--text-faint); }
+  .mini-btn {
+    background: var(--border);
+    border: 1px solid var(--border-bright);
+    color: var(--text-dim);
+    font-family: inherit;
+    font-size: 11px;
+    padding: 0 12px;
+    border-radius: 5px;
+    cursor: pointer;
+    letter-spacing: 0.05em;
+    transition: background 0.15s ease, color 0.15s ease;
+    flex-shrink: 0;
+  }
+  .mini-btn:hover { background: var(--border-bright); color: var(--text); }
+  .field-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 10px;
+  }
+
+  /* ---- buttons ---- */
+  .btn-row { display: flex; gap: 10px; margin-bottom: 20px; }
+  .btn {
+    font-family: inherit;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    border-radius: 7px;
+    cursor: pointer;
+    transition: transform 0.08s ease, box-shadow 0.2s ease, background 0.2s ease;
+    border: 1px solid transparent;
+  }
+  .btn:active { transform: translateY(1px); }
+  .btn-primary {
+    flex: 1;
+    padding: 15px;
+    font-size: 14px;
+    background: linear-gradient(180deg, #1c2b24 0%, #14201b 100%);
+    border-color: var(--green-dim);
+    color: var(--green);
+    text-transform: uppercase;
+    box-shadow: 0 0 20px -6px var(--green-glow), inset 0 1px 0 rgba(255,255,255,0.05);
+  }
+  .btn-primary:hover { background: linear-gradient(180deg, #213328 0%, #18241e 100%); }
+  .btn-primary.active {
+    background: linear-gradient(180deg, #2c1715 0%, #1f1110 100%);
+    border-color: #7a2d27;
+    color: var(--red);
+    box-shadow: 0 0 20px -6px var(--red-glow), inset 0 1px 0 rgba(255,255,255,0.05);
+  }
+  .btn-test {
+    padding: 15px 16px;
+    font-size: 12px;
+    background: var(--panel-2);
+    border-color: var(--border-bright);
+    color: var(--text-dim);
+    text-transform: uppercase;
+    white-space: nowrap;
+  }
+  .btn-test:hover { color: var(--text); border-color: var(--green-dim); }
+
+  /* ---- volume ---- */
+  .volume {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 22px;
+    padding: 0 2px;
+  }
+  .volume span {
+    font-size: 10px;
+    color: var(--text-faint);
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    white-space: nowrap;
+  }
+  input[type="range"] {
+    -webkit-appearance: none;
+    appearance: none;
+    flex: 1;
+    height: 4px;
+    background: var(--border-bright);
+    border-radius: 2px;
+    cursor: pointer;
+  }
+  input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 15px; height: 15px;
+    border-radius: 50%;
+    background: var(--green);
+    box-shadow: 0 0 8px var(--green-glow);
+    cursor: pointer;
+  }
+  input[type="range"]::-moz-range-thumb {
+    width: 15px; height: 15px;
+    border: none;
+    border-radius: 50%;
+    background: var(--green);
+    box-shadow: 0 0 8px var(--green-glow);
+    cursor: pointer;
+  }
+
+  /* ---- log ---- */
+  .log-header {
+    font-size: 10px;
+    color: var(--text-faint);
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    margin-bottom: 8px;
+    display: flex;
+    justify-content: space-between;
+  }
+  .log {
+    background: var(--inset);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    height: 168px;
+    overflow-y: auto;
+    padding: 8px;
+    font-size: 12px;
+  }
+  .log::-webkit-scrollbar { width: 8px; }
+  .log::-webkit-scrollbar-track { background: transparent; }
+  .log::-webkit-scrollbar-thumb { background: var(--border-bright); border-radius: 4px; }
+  .log-row {
+    display: flex;
+    gap: 8px;
+    padding: 5px 6px;
+    border-left: 2px solid var(--border-bright);
+    margin-bottom: 3px;
+    line-height: 1.45;
+    animation: logIn 0.25s ease-out;
+  }
+  @keyframes logIn {
+    from { opacity: 0; transform: translateX(-4px); }
+    to { opacity: 1; transform: translateX(0); }
+  }
+  .log-row.cash { border-left-color: var(--green); background: rgba(53,211,153,0.06); }
+  .log-row.buzz { border-left-color: var(--red); background: rgba(255,93,82,0.06); }
+  .log-row.error { border-left-color: var(--red); }
+  .log-row.warn { border-left-color: var(--amber); }
+  .log-row.info { border-left-color: var(--border-bright); }
+  .log-time { color: var(--text-faint); flex-shrink: 0; }
+  .log-icon { flex-shrink: 0; width: 14px; text-align: center; }
+  .log-row.cash .log-icon { color: var(--green); }
+  .log-row.buzz .log-icon { color: var(--red); }
+  .log-row.error .log-icon { color: var(--red); }
+  .log-row.warn .log-icon { color: var(--amber); }
+  .log-text { color: var(--text-dim); word-break: break-word; }
+  .log-row.cash .log-text, .log-row.buzz .log-text { color: var(--text); }
+
+  .footnote {
+    margin-top: 16px;
+    font-size: 10px;
+    color: var(--text-faint);
+    line-height: 1.6;
+    letter-spacing: 0.02em;
+  }
+
+  @media (max-width: 480px) {
+    .screen { padding: 20px 16px 18px; }
+    .btn-row { flex-direction: column; }
+    .field-grid { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+<div class="scanlines"></div>
+<div class="grain"></div>
+<div class="flash-overlay"></div>
+
+<main class="terminal">
+  <div class="titlebar">
+    <div class="dots"><i></i><i></i><i></i></div>
+    <div class="path">— live equity watch</div>
+  </div>
+
+  <div class="screen">
+    <header>
+      <div class="ticker-id">
+        <div class="sym" id="tickerLabel">CBRS</div>
+        <div class="name" id="companyName">— awaiting connection —</div>
+      </div>
+      <div class="status-pill">
+        <span class="status-dot idle" id="statusDot"></span>
+        <span class="status-text idle" id="statusText">Idle</span>
+      </div>
+    </header>
+
+    <div class="price-block">
+      <div class="price" id="price">$ ———</div>
+      <div class="change flat" id="change">—</div>
+      <div><span class="verdict below" id="verdict">awaiting first quote</span></div>
+    </div>
+
+    <div class="gauge-wrap">
+      <div class="gauge-labels">
+        <span id="gaugeLo">—</span>
+        <span>PRICE vs THRESHOLD</span>
+        <span id="gaugeHi">—</span>
+      </div>
+      <div class="gauge">
+        <div class="gauge-fill below" id="gaugeFill"></div>
+        <div class="gauge-thresh" id="gaugeThresh" data-label="$350"></div>
+        <div class="gauge-marker" id="gaugeMarker"></div>
+      </div>
+    </div>
+
+    <div class="status-grid">
+      <div class="stat">
+        <div class="label">Last Update</div>
+        <div class="val" id="lastUpdate">—</div>
+      </div>
+      <div class="stat">
+        <div class="label">Next Check</div>
+        <div class="val" id="countdown">—</div>
+      </div>
+      <div class="stat">
+        <div class="label">Checks / Moves</div>
+        <div class="val"><span id="checks">0</span> / <span id="changes">0</span></div>
+      </div>
+    </div>
+
+    <div class="controls">
+      <div class="field">
+        <label for="apiKey">Finnhub API Key — <a href="https://finnhub.io/register" target="_blank" rel="noopener">get a free one</a> (60 req/min, no card)</label>
+        <div class="input-row">
+          <input type="password" id="apiKey" placeholder="paste your finnhub token" autocomplete="off" spellcheck="false">
+          <button class="mini-btn" id="showKey">show</button>
+        </div>
+      </div>
+      <div class="field">
+        <div class="field-grid">
+          <div>
+            <label for="ticker">Ticker</label>
+            <input type="text" id="ticker" value="CBRS" spellcheck="false">
+          </div>
+          <div>
+            <label for="threshold">Threshold $</label>
+            <input type="number" id="threshold" value="350" step="0.01" min="0">
+          </div>
+          <div>
+            <label for="interval">Every (s)</label>
+            <input type="number" id="interval" value="5" min="3" max="60" step="1">
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="btn-row">
+      <button class="btn btn-primary" id="startBtn">▶ Start Monitoring</button>
+      <button class="btn btn-test" id="testCash">🔔 Test</button>
+      <button class="btn btn-test" id="testBuzz">✖ Test</button>
+    </div>
+
+    <div class="volume">
+      <span>Vol</span>
+      <input type="range" id="volume" min="0" max="1" step="0.01" value="0.7">
+    </div>
+
+    <div class="log-header">
+      <span>Event Log</span>
+      <span>newest first</span>
+    </div>
+    <div class="log" id="log"></div>
+
+    <div class="footnote">
+      Sounds are synthesized live in your browser — a cash-register chime only when the price <em>rises</em>
+      while above your threshold, a buzzer only when it <em>falls</em> while at or below it. Every other move
+      (down-but-above, up-but-below) is logged silently. Audio unlocks when you press Start.
+      Data via Finnhub's quote endpoint. Note: a freshly-listed IPO may take time to appear — test with a
+      known ticker like AAPL if you see "no data."
+    </div>
+  </div>
+</main>
+
+<script>
+(function () {
+  'use strict';
+
+  // ---------------- state ----------------
+  var STORAGE_KEY = 'cbrs_monitor_settings_v1';
+  var DEFAULTS = { apiKey: '', ticker: 'CBRS', threshold: 350, interval: 5 };
+  var settings = Object.assign({}, DEFAULTS);
+
+  var audioCtx = null, masterGain = null;
+  var monitoring = false;
+  var pollTimeout = null, countdownInterval = null;
+  var nextPollAt = 0;
+  var lastPrice = null;
+  var checkCount = 0, changeCount = 0;
+
+  // ---------------- dom ----------------
+  var $ = function (id) { return document.getElementById(id); };
+  var tickerLabel = $('tickerLabel'), companyName = $('companyName');
+  var statusDot = $('statusDot'), statusText = $('statusText');
+  var priceEl = $('price'), changeEl = $('change'), verdictEl = $('verdict');
+  var gaugeFill = $('gaugeFill'), gaugeThresh = $('gaugeThresh'), gaugeMarker = $('gaugeMarker');
+  var gaugeLo = $('gaugeLo'), gaugeHi = $('gaugeHi');
+  var lastUpdate = $('lastUpdate'), countdownEl = $('countdown');
+  var checksEl = $('checks'), changesEl = $('changes');
+  var apiKeyEl = $('apiKey'), tickerEl = $('ticker'), thresholdEl = $('threshold'), intervalEl = $('interval');
+  var showKeyBtn = $('showKey'), startBtn = $('startBtn');
+  var testCashBtn = $('testCash'), testBuzzBtn = $('testBuzz');
+  var volumeEl = $('volume'), logEl = $('log');
+
+  // ---------------- settings persistence ----------------
+  function loadSettings() {
+    try {
+      var raw = localStorage.getItem(STORAGE_KEY);
+      if (raw) settings = Object.assign({}, DEFAULTS, JSON.parse(raw));
+    } catch (e) { /* localStorage unavailable — fine */ }
+  }
+  function saveSettings() {
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(settings)); }
+    catch (e) { /* ignore */ }
+  }
+  function readInputsIntoSettings() {
+    settings.apiKey = apiKeyEl.value.trim();
+    settings.ticker = (tickerEl.value.trim() || 'CBRS').toUpperCase();
+    settings.threshold = parseFloat(thresholdEl.value);
+    if (!isFinite(settings.threshold)) settings.threshold = 350;
+    var iv = parseInt(intervalEl.value, 10);
+    if (!isFinite(iv)) iv = 5;
+    settings.interval = Math.min(60, Math.max(3, iv));
+  }
+
+  // ---------------- audio ----------------
+  function ensureAudio() {
+    if (!audioCtx) {
+      var AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) return;
+      audioCtx = new AC();
+      masterGain = audioCtx.createGain();
+      masterGain.gain.value = parseFloat(volumeEl.value);
+      var comp = audioCtx.createDynamicsCompressor();
+      masterGain.connect(comp);
+      comp.connect(audioCtx.destination);
+    }
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+  }
+
+  // cash register "cha-ching": mechanical noise burst + bright bell cluster
+  function playCashRegister() {
+    ensureAudio();
+    if (!audioCtx) return;
+    var ctx = audioCtx, now = ctx.currentTime;
+
+    // "cha" — filtered noise burst
+    var nDur = 0.13;
+    var buf = ctx.createBuffer(1, Math.floor(ctx.sampleRate * nDur), ctx.sampleRate);
+    var d = buf.getChannelData(0);
+    for (var i = 0; i < d.length; i++) {
+      d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / d.length, 2.5);
+    }
+    var noise = ctx.createBufferSource(); noise.buffer = buf;
+    var nf = ctx.createBiquadFilter(); nf.type = 'bandpass'; nf.frequency.value = 1900; nf.Q.value = 0.8;
+    var ng = ctx.createGain(); ng.gain.value = 0.4;
+    noise.connect(nf); nf.connect(ng); ng.connect(masterGain);
+    noise.start(now); noise.stop(now + nDur);
+
+    // "ching" — two bell strikes with inharmonic partials
+    var partials = [1318.5, 1760, 2637, 3520, 4690];
+    [0, 0.075].forEach(function (offset, strike) {
+      var t0 = now + 0.05 + offset;
+      var amp = strike === 0 ? 0.5 : 0.34;
+      partials.forEach(function (f, i) {
+        var o = ctx.createOscillator(); o.type = 'sine'; o.frequency.value = f;
+        var g = ctx.createGain();
+        var peak = amp / (i + 1.5);
+        g.gain.setValueAtTime(0.0001, t0);
+        g.gain.linearRampToValueAtTime(peak, t0 + 0.004);
+        g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.9);
+        o.connect(g); g.connect(masterGain);
+        o.start(t0); o.stop(t0 + 1.0);
+      });
+    });
+  }
+
+  // buzzer: detuned square waves + tremolo + sawtooth grit
+  function playBuzzer() {
+    ensureAudio();
+    if (!audioCtx) return;
+    var ctx = audioCtx, now = ctx.currentTime;
+    var dur = 0.55;
+
+    [104, 110.5].forEach(function (freq) {
+      var o = ctx.createOscillator(); o.type = 'square'; o.frequency.value = freq;
+      var g = ctx.createGain();
+      g.gain.setValueAtTime(0.0001, now);
+      g.gain.linearRampToValueAtTime(0.17, now + 0.012);
+      g.gain.setValueAtTime(0.17, now + dur - 0.06);
+      g.gain.linearRampToValueAtTime(0.0001, now + dur);
+      var lfo = ctx.createOscillator(); lfo.type = 'sine'; lfo.frequency.value = 23;
+      var lg = ctx.createGain(); lg.gain.value = 0.09;
+      lfo.connect(lg); lg.connect(g.gain);
+      o.connect(g); g.connect(masterGain);
+      o.start(now); o.stop(now + dur);
+      lfo.start(now); lfo.stop(now + dur);
+    });
+
+    var o2 = ctx.createOscillator(); o2.type = 'sawtooth'; o2.frequency.value = 218;
+    var g2 = ctx.createGain();
+    g2.gain.setValueAtTime(0.0001, now);
+    g2.gain.linearRampToValueAtTime(0.05, now + 0.012);
+    g2.gain.setValueAtTime(0.05, now + dur - 0.06);
+    g2.gain.linearRampToValueAtTime(0.0001, now + dur);
+    o2.connect(g2); g2.connect(masterGain);
+    o2.start(now); o2.stop(now + dur);
+  }
+
+  // ---------------- api ----------------
+  function fetchQuote() {
+    var url = 'https://finnhub.io/api/v1/quote?symbol=' +
+      encodeURIComponent(settings.ticker) + '&token=' + encodeURIComponent(settings.apiKey);
+    return fetch(url).then(function (res) {
+      if (res.status === 401 || res.status === 403) { var e = new Error('auth'); e.code = 'AUTH'; throw e; }
+      if (res.status === 429) { var r = new Error('rate'); r.code = 'RATE'; throw r; }
+      if (!res.ok) { var h = new Error('http ' + res.status); h.code = 'HTTP'; throw h; }
+      return res.json();
+    });
+  }
+
+  function fetchProfile() {
+    var url = 'https://finnhub.io/api/v1/stock/profile2?symbol=' +
+      encodeURIComponent(settings.ticker) + '&token=' + encodeURIComponent(settings.apiKey);
+    fetch(url).then(function (res) {
+      return res.ok ? res.json() : null;
+    }).then(function (data) {
+      if (data && data.name) companyName.textContent = data.name;
+      else companyName.textContent = settings.ticker + ' — listed equity';
+    }).catch(function () {
+      companyName.textContent = settings.ticker + ' — listed equity';
+    });
+  }
+
+  // ---------------- polling ----------------
+  function poll() {
+    fetchQuote().then(function (q) {
+      if (!q || (q.c === 0 && q.pc === 0)) {
+        log('error', 'No data for "' + settings.ticker + '". A brand-new IPO may not be in Finnhub yet — ' +
+          'try AAPL to confirm your key works.');
+        stopMonitoring();
+        setStatus('error', 'No data');
+        return;
+      }
+      checkCount++;
+      handleQuote(q);
+      setStatus('live', 'Live');
+    }).catch(function (e) {
+      if (e.code === 'AUTH') {
+        log('error', 'API key rejected (401 / 403). Double-check your Finnhub token.');
+        stopMonitoring();
+        setStatus('error', 'Bad API key');
+        return;
+      } else if (e.code === 'RATE') {
+        log('warn', 'Rate limited by Finnhub (429). Will retry — consider a longer interval.');
+        setStatus('warn', 'Rate limited');
+      } else {
+        log('warn', 'Could not reach Finnhub (' + (e.message || 'network error') + '). Will retry.');
+        setStatus('warn', 'Connection issue');
+      }
+    }).then(function () {
+      // runs as "finally" for both branches
+      if (monitoring) scheduleNext();
+      updateCounters();
+    });
+  }
+
+  function scheduleNext() {
+    nextPollAt = Date.now() + settings.interval * 1000;
+    pollTimeout = setTimeout(poll, settings.interval * 1000);
+  }
+
+  function handleQuote(q) {
+    var price = q.c;
+    renderPrice(q);
+
+    if (lastPrice === null) {
+      lastPrice = price;
+      log('info', 'Baseline locked at $' + price.toFixed(2) + ' — watching for moves.');
+      return;
+    }
+    if (price !== lastPrice) {
+      changeCount++;
+      var above = price > settings.threshold;
+      var wentUp = price > lastPrice;
+      var arrow = wentUp ? '\u25B2' : '\u25BC';
+      var move = arrow + ' $' + lastPrice.toFixed(2) + ' \u2192 $' + price.toFixed(2);
+
+      if (wentUp && above) {
+        // rose, and in healthy territory — ring the register
+        playCashRegister();
+        flash('green');
+        log('cash', move + '  ·  up & above $' + settings.threshold + '  ·  cha-ching');
+      } else if (!wentUp && !above) {
+        // fell, and at/below the line — trip the buzzer
+        playBuzzer();
+        flash('red');
+        log('buzz', move + '  ·  down & at/below $' + settings.threshold + '  ·  buzzer');
+      } else {
+        // mismatched: down-but-above, or up-but-below — a move, but no sound
+        log('info', move + '  ·  ' + (above ? 'above' : 'at/below') +
+          ' $' + settings.threshold + '  ·  no sound');
+      }
+      lastPrice = price;
+    }
+  }
+
+  // ---------------- rendering ----------------
+  function renderPrice(q) {
+    var price = q.c;
+    var above = price > settings.threshold;
+
+    priceEl.textContent = '$' + price.toFixed(2);
+    priceEl.classList.toggle('above', above);
+    priceEl.classList.toggle('below', !above);
+
+    if (q.d != null && q.dp != null && isFinite(q.d) && isFinite(q.dp)) {
+      var arrow = q.d > 0 ? '\u25B2' : (q.d < 0 ? '\u25BC' : '\u25A0');
+      var sign = q.d > 0 ? '+' : '';
+      changeEl.textContent = arrow + ' ' + sign + q.d.toFixed(2) + ' (' + sign + q.dp.toFixed(2) + '%)';
+      changeEl.className = 'change ' + (q.d > 0 ? 'up' : (q.d < 0 ? 'down' : 'flat'));
+    } else {
+      changeEl.textContent = '\u2014';
+      changeEl.className = 'change flat';
+    }
+
+    lastUpdate.textContent = new Date().toLocaleTimeString();
+
+    if (above) {
+      verdictEl.textContent = 'above $' + settings.threshold + ' — a rise rings the register';
+      verdictEl.className = 'verdict above';
+    } else {
+      verdictEl.textContent = 'at/below $' + settings.threshold + ' — a drop trips the buzzer';
+      verdictEl.className = 'verdict below';
+    }
+
+    renderGauge(price, q);
+  }
+
+  function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
+
+  function renderGauge(price, q) {
+    var t = settings.threshold;
+    var low = q.l && q.l > 0 ? q.l : price;
+    var high = q.h && q.h > 0 ? q.h : price;
+    var lo = Math.min(low, price, t);
+    var hi = Math.max(high, price, t);
+    var pad = (hi - lo) * 0.15 || Math.abs(t) * 0.05 || 1;
+    var min = lo - pad, max = hi + pad;
+    var span = (max - min) || 1;
+
+    var pricePct = clamp(((price - min) / span) * 100, 0, 100);
+    var threshPct = clamp(((t - min) / span) * 100, 0, 100);
+
+    gaugeFill.style.width = pricePct + '%';
+    gaugeFill.classList.toggle('above', price > t);
+    gaugeFill.classList.toggle('below', price <= t);
+    gaugeThresh.style.left = threshPct + '%';
+    gaugeThresh.setAttribute('data-label', '$' + t);
+    gaugeMarker.style.left = pricePct + '%';
+    gaugeLo.textContent = '$' + min.toFixed(0);
+    gaugeHi.textContent = '$' + max.toFixed(0);
+  }
+
+  function flash(color) {
+    document.body.classList.remove('flash-green', 'flash-red');
+    void document.body.offsetWidth;
+    document.body.classList.add(color === 'green' ? 'flash-green' : 'flash-red');
+    setTimeout(function () {
+      document.body.classList.remove('flash-green', 'flash-red');
+    }, 720);
+  }
+
+  function setStatus(state, text) {
+    statusDot.className = 'status-dot ' + state;
+    statusText.className = 'status-text ' + state;
+    statusText.textContent = text;
+  }
+
+  function updateCounters() {
+    checksEl.textContent = checkCount;
+    changesEl.textContent = changeCount;
+  }
+
+  function updateCountdown() {
+    if (!monitoring) return;
+    var ms = nextPollAt - Date.now();
+    countdownEl.textContent = (ms > 0 ? (ms / 1000).toFixed(1) : '0.0') + 's';
+  }
+
+  var LOG_ICONS = { cash: '\u25C9', buzz: '\u2715', error: '\u26A0', warn: '!', info: '\u00B7' };
+  function log(type, msg) {
+    var row = document.createElement('div');
+    row.className = 'log-row ' + type;
+    var time = document.createElement('span');
+    time.className = 'log-time';
+    time.textContent = new Date().toLocaleTimeString();
+    var icon = document.createElement('span');
+    icon.className = 'log-icon';
+    icon.textContent = LOG_ICONS[type] || '\u00B7';
+    var text = document.createElement('span');
+    text.className = 'log-text';
+    text.textContent = msg;
+    row.appendChild(time); row.appendChild(icon); row.appendChild(text);
+    logEl.insertBefore(row, logEl.firstChild);
+    while (logEl.children.length > 120) logEl.removeChild(logEl.lastChild);
+  }
+
+  // ---------------- start / stop ----------------
+  function setControlsEnabled(on) {
+    [apiKeyEl, tickerEl, thresholdEl, intervalEl].forEach(function (el) { el.disabled = !on; });
+  }
+
+  function startMonitoring() {
+    readInputsIntoSettings();
+    intervalEl.value = settings.interval;
+    tickerEl.value = settings.ticker;
+
+    if (!settings.apiKey) {
+      log('error', 'Enter your free Finnhub API key first.');
+      apiKeyEl.focus();
+      return;
+    }
+
+    saveSettings();
+    ensureAudio(); // user gesture — unlocks audio
+
+    monitoring = true;
+    lastPrice = null;
+    checkCount = 0;
+    changeCount = 0;
+    updateCounters();
+    setControlsEnabled(false);
+    startBtn.classList.add('active');
+    startBtn.textContent = '\u25A0 Stop Monitoring';
+    tickerLabel.textContent = settings.ticker;
+    companyName.textContent = 'fetching profile\u2026';
+    setStatus('live', 'Connecting\u2026');
+    log('info', 'Monitoring ' + settings.ticker + ' every ' + settings.interval +
+      's · threshold $' + settings.threshold + '.');
+
+    fetchProfile();
+    poll();
+    countdownInterval = setInterval(updateCountdown, 150);
+  }
+
+  function stopMonitoring() {
+    if (!monitoring) return;
+    monitoring = false;
+    if (pollTimeout) { clearTimeout(pollTimeout); pollTimeout = null; }
+    if (countdownInterval) { clearInterval(countdownInterval); countdownInterval = null; }
+    setControlsEnabled(true);
+    startBtn.classList.remove('active');
+    startBtn.textContent = '\u25B6 Start Monitoring';
+    countdownEl.textContent = '\u2014';
+    setStatus('idle', 'Stopped');
+    log('info', 'Monitoring stopped.');
+  }
+
+  // ---------------- events ----------------
+  startBtn.addEventListener('click', function () {
+    if (monitoring) stopMonitoring(); else startMonitoring();
+  });
+  testCashBtn.addEventListener('click', function () {
+    ensureAudio(); playCashRegister(); flash('green');
+  });
+  testBuzzBtn.addEventListener('click', function () {
+    ensureAudio(); playBuzzer(); flash('red');
+  });
+  volumeEl.addEventListener('input', function () {
+    if (masterGain) masterGain.gain.value = parseFloat(volumeEl.value);
+  });
+  showKeyBtn.addEventListener('click', function () {
+    var hidden = apiKeyEl.type === 'password';
+    apiKeyEl.type = hidden ? 'text' : 'password';
+    showKeyBtn.textContent = hidden ? 'hide' : 'show';
+  });
+  [apiKeyEl, tickerEl, thresholdEl, intervalEl].forEach(function (el) {
+    el.addEventListener('change', function () {
+      readInputsIntoSettings();
+      saveSettings();
+    });
+  });
+  window.addEventListener('beforeunload', function () {
+    if (pollTimeout) clearTimeout(pollTimeout);
+    if (countdownInterval) clearInterval(countdownInterval);
+  });
+
+  // ---------------- init ----------------
+  function init() {
+    loadSettings();
+    apiKeyEl.value = settings.apiKey;
+    tickerEl.value = settings.ticker;
+    thresholdEl.value = settings.threshold;
+    intervalEl.value = settings.interval;
+    tickerLabel.textContent = settings.ticker;
+    gaugeThresh.setAttribute('data-label', '$' + settings.threshold);
+    updateCounters();
+    log('info', 'Terminal ready. Paste your Finnhub key, set your threshold, and press Start.');
+  }
+
+  init();
+})();
+</script>
+</body>
+</html>

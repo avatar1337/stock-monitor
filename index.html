@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>CBRS Monitor — Cha-Ching Terminal</title>
+<title>Stock Monitor — Cha-Ching Terminal</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300;400;500;600;700&display=swap" rel="stylesheet">
@@ -540,7 +540,7 @@
   <div class="screen">
     <header>
       <div class="ticker-id">
-        <div class="sym" id="tickerLabel">CBRS</div>
+        <div class="sym" id="tickerLabel"></div>
         <div class="name" id="companyName">— awaiting connection —</div>
       </div>
       <div class="status-pill">
@@ -563,7 +563,7 @@
       </div>
       <div class="gauge">
         <div class="gauge-fill below" id="gaugeFill"></div>
-        <div class="gauge-thresh" id="gaugeThresh" data-label="$350"></div>
+        <div class="gauge-thresh" id="gaugeThresh" data-label="$0"></div>
         <div class="gauge-marker" id="gaugeMarker"></div>
       </div>
     </div>
@@ -595,11 +595,11 @@
         <div class="field-grid">
           <div>
             <label for="ticker">Ticker</label>
-            <input type="text" id="ticker" value="CBRS" spellcheck="false">
+            <input type="text" id="ticker" value="" spellcheck="false">
           </div>
           <div>
             <label for="threshold">Threshold $</label>
-            <input type="number" id="threshold" value="350" step="0.01" min="0">
+            <input type="number" id="threshold" value="0" step="0.01" min="0">
           </div>
           <div>
             <label for="interval">Every (s)</label>
@@ -642,7 +642,7 @@
 
   // ---------------- state ----------------
   var STORAGE_KEY = 'cbrs_monitor_settings_v1';
-  var DEFAULTS = { apiKey: '', ticker: 'CBRS', threshold: 350, interval: 5 };
+  var DEFAULTS = { apiKey: '', ticker: '', threshold: 0, interval: 5 };
   var settings = Object.assign({}, DEFAULTS);
 
   var audioCtx = null, masterGain = null;
@@ -679,7 +679,7 @@
   }
   function readInputsIntoSettings() {
     settings.apiKey = apiKeyEl.value.trim();
-    settings.ticker = (tickerEl.value.trim() || 'CBRS').toUpperCase();
+    settings.ticker = (tickerEl.value.trim() || '').toUpperCase();
     settings.threshold = parseFloat(thresholdEl.value);
     if (!isFinite(settings.threshold)) settings.threshold = 350;
     var iv = parseInt(intervalEl.value, 10);
